@@ -1,0 +1,112 @@
+<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ESP Control</title>
+<style>*{box-sizing:border-box}body{font-family:sans-serif;max-width:900px;margin:0 auto;padding:1rem;background:#111;color:#eee}
+h1{color:#4fc3f7}h2{color:#81d4fa;border-bottom:1px solid #333;padding-bottom:.3rem}
+.card{background:#222;padding:1rem;border-radius:8px;margin:.7rem 0}
+input,textarea{width:100%;background:#333;border:1px solid #444;color:#fff;padding:.5rem;border-radius:4px;margin:.3rem 0;box-sizing:border-box}
+button{background:#4fc3f7;color:#000;border:none;padding:.5rem 1rem;border-radius:4px;cursor:pointer;font-weight:bold;margin:.2rem}
+button:hover{background:#29b6f6}button.d{background:#ef5350;color:#fff}
+.row{display:flex;gap:.3rem;align-items:center}
+.item{background:#333;padding:.5rem;border-radius:4px;margin:.3rem 0;display:flex;gap:.3rem;align-items:center}
+.item input{flex:1;padding:.3rem;background:#222;border:1px solid #444;color:#fff;border-radius:3px}
+.badge{background:#555;padding:.2rem .5rem;border-radius:3px;font-size:.8rem;margin-right:.3rem}
+.status{padding:.5rem;border-radius:4px;margin:.5rem 0}
+.ok{background:#1b5e20;color:#a5d6a7}
+</style></head><body>
+<h1>🎛️ ESP Control Panel</h1>
+<div id="status" class="status ok">🟢 Connected — auto-sync every 3 sec</div>
+<div class="card"><h2>📡 Devices</h2><div id="devs">Loading...</div></div>
+<div class="card"><h2>✏️ Edit Device</h2>
+<select id="devSel" style="width:100%;padding:.5rem;background:#333;color:#fff;border:1px solid #444;border-radius:4px;margin-bottom:.5rem"></select>
+<button onclick="loadDev()">Load</button>
+<div id="editor"></div>
+</div>
+<div class="card"><h2>🤖 Test AI (from PC)</h2>
+<textarea id="aiP" rows="2" placeholder="Prompt..."></textarea>
+<button onclick="testAI()">Send</button>
+<div id="aiRes" class="card" style="margin-top:1rem;background:#1a1a1a"></div>
+</div>
+<script>
+// ВАЖНО: токен ниже должен совпадать с API_TOKEN в app.py.
+// Для публичного деплоя вынеси его в переменную окружения,
+// а не храни прямо в HTML.
+const API="", TOKEN="CHANGE_ME_RANDOM_SECRET_TOKEN";
+const hdr={"Authorization":"Bearer "+TOKEN,"Content-Type":"application/json"};
+
+async function loadDevs(){
+  const r=await(await fetch("/api/devices",{headers:hdr})).json();
+  const sel=document.getElementById("devSel");
+  sel.innerHTML="";
+  for(const id in r){
+    if(id.startsWith("_")) continue;
+    const opt=document.createElement("option"); opt.value=id; opt.textContent=id;
+    sel.appendChild(opt);
+  }
+  const devHtml=Object.keys(r).filter(k=>!k.startsWith("_")).map(id=>{
+    const d=r[id];
+    return `<div class="card" style="background:#2a2a2a;padding:.5rem;margin:.3rem 0"><b>${id}</b> <span class="badge">P:${(d.prompts||[]).length}</span> <span class="badge">N:${(d.notes||[]).length}</span> <span class="badge">M:${(d.messages||[]).length}</span></div>`;
+  }).join("");
+  document.getElementById("devs").innerHTML=devHtml||"No devices yet";
+}
+
+async function loadDev(){
+  curDev=document.getElementById("devSel").value; if(!curDev) return;
+  const r=await(await fetch("/api/device/"+curDev+"?token="+TOKEN)).json();
+  let h="<h3>Editing: "+curDev+"</h3>";
+
+  h+="<h4>Prompts</h4>";
+  (r.prompts||[]).forEach((p,i)=>{
+    h+=`<div class="item"><span>${i+1}.</span><input id="p${i}" value="${(p||'').replace(/"/g,'&quot;')}"><button class="d" onclick="delP(${i})">×</button></div>`;
+  });
+  h+=`<div class="row"><input id="newP" placeholder="New prompt"><button onclick="addP()">+</button></div>`;
+
+  h+="<h4>Notes</h4>";
+  (r.notes||[]).forEach((n,i)=>{
+    h+=`<div class="item"><span>${i+1}.</span><input id="n${i}" value="${(n||'').replace(/"/g,'&quot;')}"><button class="d" onclick="delN(${i})">×</button></div>`;
+  });
+  h+=`<div class="row"><input id="newN" placeholder="New note"><button onclick="addN()">+</button><button class="d" onclick="clrN()">Clear</button></div>`;
+
+  h+="<h4>Messages</h4>";
+  (r.messages||[]).forEach((m,i)=>{
+    const t=m.text||m;
+    h+=`<div class="item"><span>[${m.fromESP?'Y':'W'}]</span><input id="m${i}" value="${(t||'').replace(/"/g,'&quot;')}"><button class="d" onclick="delM(${i})">×</button></div>`;
+  });
+  h+=`<div class="row"><input id="newM" placeholder="New message"><button onclick="addM()">+</button><button class="d" onclick="clrM()">Clear</button></div>`;
+
+  h+=`<h4>Notice</h4><div class="row"><input id="noticeInp" value="${(r.notice||'').replace(/"/g,'&quot;')}"><button onclick="setN()">Set</button></div>`;
+
+  document.getElementById("editor").innerHTML=h;
+}
+
+async function saveAll(){
+  if(!curDev) return;
+  const r=await(await fetch("/api/device/"+curDev+"?token="+TOKEN)).json();
+  (r.prompts||[]).forEach((_,i)=>{const v=document.getElementById("p"+i); if(v) r.prompts[i]=v.value;});
+  (r.notes||[]).forEach((_,i)=>{const v=document.getElementById("n"+i); if(v) r.notes[i]=v.value;});
+  (r.messages||[]).forEach((_,i)=>{const v=document.getElementById("m"+i); if(v) r.messages[i].text=v.value;});
+  const nv=document.getElementById("noticeInp"); if(nv) r.notice=nv.value;
+  await fetch("/api/sync",{method:"POST",headers:hdr,body:JSON.stringify({device_id:curDev,...r})});
+  document.getElementById("status").textContent="✅ Saved! ESP will pick up on next sync (~3 sec)";
+  loadDevs();
+}
+
+async function delP(i){const r=await(await fetch("/api/device/"+curDev+"?token="+TOKEN)).json(); r.prompts.splice(i,1); await fetch("/api/sync",{method:"POST",headers:hdr,body:JSON.stringify({device_id:curDev,prompts:r.prompts,notes:r.notes,messages:r.messages,notice:r.notice})}); loadDev();}
+async function addP(){const v=document.getElementById("newP").value.trim(); if(!v) return; const r=await(await fetch("/api/device/"+curDev+"?token="+TOKEN)).json(); r.prompts=r.prompts||[]; r.prompts.push(v); await fetch("/api/sync",{method:"POST",headers:hdr,body:JSON.stringify({device_id:curDev,prompts:r.prompts,notes:r.notes,messages:r.messages,notice:r.notice})}); document.getElementById("newP").value=""; loadDev();}
+async function delN(i){const r=await(await fetch("/api/device/"+curDev+"?token="+TOKEN)).json(); r.notes.splice(i,1); await fetch("/api/sync",{method:"POST",headers:hdr,body:JSON.stringify({device_id:curDev,prompts:r.prompts,notes:r.notes,messages:r.messages,notice:r.notice})}); loadDev();}
+async function addN(){const v=document.getElementById("newN").value.trim(); if(!v) return; const r=await(await fetch("/api/device/"+curDev+"?token="+TOKEN)).json(); r.notes=r.notes||[]; r.notes.push(v); await fetch("/api/sync",{method:"POST",headers:hdr,body:JSON.stringify({device_id:curDev,prompts:r.prompts,notes:r.notes,messages:r.messages,notice:r.notice})}); document.getElementById("newN").value=""; loadDev();}
+async function clrN(){if(!confirm("Clear?"))return; const r=await(await fetch("/api/device/"+curDev+"?token="+TOKEN)).json(); r.notes=[]; await fetch("/api/sync",{method:"POST",headers:hdr,body:JSON.stringify({device_id:curDev,prompts:r.prompts,notes:r.notes,messages:r.messages,notice:r.notice})}); loadDev();}
+async function delM(i){const r=await(await fetch("/api/device/"+curDev+"?token="+TOKEN)).json(); r.messages.splice(i,1); await fetch("/api/sync",{method:"POST",headers:hdr,body:JSON.stringify({device_id:curDev,prompts:r.prompts,notes:r.notes,messages:r.messages,notice:r.notice})}); loadDev();}
+async function addM(){const v=document.getElementById("newM").value.trim(); if(!v) return; const r=await(await fetch("/api/device/"+curDev+"?token="+TOKEN)).json(); r.messages=r.messages||[]; r.messages.push({text:v,fromESP:false,time:Date.now()}); await fetch("/api/sync",{method:"POST",headers:hdr,body:JSON.stringify({device_id:curDev,prompts:r.prompts,notes:r.notes,messages:r.messages,notice:r.notice})}); document.getElementById("newM").value=""; loadDev();}
+async function clrM(){if(!confirm("Clear?"))return; const r=await(await fetch("/api/device/"+curDev+"?token="+TOKEN)).json(); r.messages=[]; await fetch("/api/sync",{method:"POST",headers:hdr,body:JSON.stringify({device_id:curDev,prompts:r.prompts,notes:r.notes,messages:r.messages,notice:r.notice})}); loadDev();}
+async function setN(){const v=document.getElementById("noticeInp").value; const r=await(await fetch("/api/device/"+curDev+"?token="+TOKEN)).json(); r.notice=v; await fetch("/api/sync",{method:"POST",headers:hdr,body:JSON.stringify({device_id:curDev,prompts:r.prompts,notes:r.notes,messages:r.messages,notice:r.notice})});}
+
+async function testAI(){
+  const p=document.getElementById("aiP").value.trim(); if(!p) return;
+  const id=document.getElementById("devSel").value; if(!id){alert("Select device first");return;}
+  document.getElementById("aiRes").textContent="Thinking... (may take 10-60 sec)";
+  const r=await(await fetch("/api/ai",{method:"POST",headers:hdr,body:JSON.stringify({prompt:p,device_id:id})})).json();
+  document.getElementById("aiRes").textContent="Response: "+(r.response||r.err);
+}
+
+loadDevs();
+setInterval(loadDevs, 3000);
+</script></body></html>
