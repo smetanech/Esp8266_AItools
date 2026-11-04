@@ -1,6 +1,6 @@
 # ESP8266 AI Terminal
 
-![preview](docs/main_preview.png)
+![preview](main_preview.png)
 
 A smart OLED terminal based on the **ESP8266** with games, a built-in AI chat, clock, calculator, notes, and messages. The whole device is controlled with just two buttons and renders its interface on a 128×64 monochrome OLED — like a tiny wearable computer.
 
